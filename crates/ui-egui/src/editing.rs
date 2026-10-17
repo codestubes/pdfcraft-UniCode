@@ -101,6 +101,12 @@ impl PdfCraftApp {
                             }
                         }
                     }
+                    // A new picture changes only the field's appearance, not its value or widgets.
+                    if let Edit::SetFieldImage { name, .. } = &edit {
+                        for f in doc.form.iter().filter(|f| &f.name == name) {
+                            changed_pages.extend(f.widgets.iter().filter_map(|w| w.page));
+                        }
+                    }
                     for old in form_before.iter() {
                         if !doc.form.iter().any(|f| f.name == old.name) {
                             for w in &old.widgets {

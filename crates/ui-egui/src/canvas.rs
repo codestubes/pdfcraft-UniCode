@@ -5580,6 +5580,28 @@ trailer << /Root 1 0 R >>
         assert_eq!(v.pages.get(&0).unwrap().tag, STALE_TAG);
     }
 
+    /// A picture chosen for an image field changes only the field's appearance: its page is drawn
+    /// again (it kept the empty field until the document was reopened).
+    #[test]
+    fn choosing_an_image_field_picture_redraws_its_page() {
+        let mut app = crate::PdfCraftApp::new();
+        let bytes = app.session.create_from_text("Form", "Sign below").unwrap();
+        app.open_bytes("form.pdf", None, bytes.as_ref().clone()).unwrap();
+        let name = "Picture".to_string();
+        let field = Edit::AddField { page: 0, rect: [72.0, 72.0, 272.0, 144.0], kind: pdfcraft_engine::NewField::Image, name: Some(name.clone()) };
+        assert!(app.apply_edit(field));
+        let ctx = egui::Context::default();
+        let req = RenderRequest { scale: 1.0, tag: 1000, ..Default::default() };
+        let v = &mut app.views[0];
+        v.last_queue = vec![req];
+        v.receive_result(&ctx, solid_result(req, 10, 10));
+        assert_ne!(v.pages.get(&0).unwrap().tag, STALE_TAG);
+        let mut png = Vec::new();
+        image::RgbImage::from_pixel(4, 2, image::Rgb([20, 30, 160])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        assert!(app.apply_edit(Edit::SetFieldImage { name, image: std::sync::Arc::new(png) }));
+        assert_eq!(app.views[0].pages.get(&0).unwrap().tag, STALE_TAG, "the page with the field is drawn again");
+    }
+
     #[test]
     fn page_and_tile_admission_accounts_for_bytes_before_count_limits() {
         let mut info = thumbnail_info(40);
