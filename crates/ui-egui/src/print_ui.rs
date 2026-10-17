@@ -518,6 +518,7 @@ impl PdfCraftApp {
                     }
                 }
             }
+            Some(printer) if saves_a_pdf(&printer) => self.save_print_pdf(&name, bytes),
             Some(printer) => self.send_to_printer(printer, bytes, self.print_draft.job(&name)),
             None => self.save_print_pdf(&name, bytes),
         }
@@ -1238,6 +1239,13 @@ pub(crate) fn body(
         }
     });
     (go, cancel)
+}
+
+/// Windows' "Microsoft Print to PDF" queue only turns what it is sent into a PDF file. PdfCraft
+/// already has the print-ready PDF, so it saves that, asking where as Save as PDF does: spooled from
+/// the background print job, the queue's own save prompt left an empty file.
+fn saves_a_pdf(printer: &str) -> bool {
+    cfg!(windows) && printer.eq_ignore_ascii_case("Microsoft Print to PDF")
 }
 
 #[cfg(test)]

@@ -426,3 +426,23 @@ fn an_empty_printer_list_says_none_were_found() {
     h.get_by_label_contains("No printers were found");
     assert!(!h.get_by_role_and_label(Role::Button, "Save as PDF").accesskit_node().is_disabled());
 }
+
+/// Windows' "Microsoft Print to PDF" saves the print-ready PDF itself instead of spooling it:
+/// spooled, the queue's own save prompt left an empty file.
+#[cfg(windows)]
+#[test]
+fn microsoft_print_to_pdf_saves_the_print_ready_pdf() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.state_mut().print_draft.printer = Some("Microsoft Print to PDF".into());
+    let out = std::env::temp_dir().join(format!("pdfcraft-ms-print-to-pdf-{}.pdf", std::process::id()));
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    assert!(h.state_mut().print_now());
+    h.run_steps(3);
+    let toast = h.state().toast.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert!(toast.contains("Saved the print-ready PDF"), "saved, not spooled: {toast:?}");
+    let printed = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(&out).unwrap())).unwrap();
+    assert!(!pdfcraft_model::pages(&printed).is_empty());
+    let _ = std::fs::remove_file(out);
+}
