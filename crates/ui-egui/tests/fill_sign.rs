@@ -1515,3 +1515,29 @@ fn photos_and_images_dropped_on_the_signature_pad_are_imported_not_opened() {
     assert_eq!(h.state().views.len(), tabs, "nothing opened behind the dialog");
     std::fs::remove_file(photo).unwrap();
 }
+
+/// The click that closes a native file picker (a double-click's second click) reaches the window
+/// behind it: it must not close the signature pad that asked, which then lost the image.
+#[test]
+fn the_click_that_closes_the_file_picker_keeps_the_signature_pad_open() {
+    let path = signature_file("click-through");
+    // Frames at display rate: the stray click arrives within a few of them.
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("form.pdf", None, FIXTURE.to_vec()).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(5);
+    h.state_mut().execute("sign.fill.signature");
+    h.run_steps(2);
+    h.get_by_label("Image").click();
+    h.run_steps(2);
+    browse_image(&mut h, &path);
+    click(&mut h, 150.0, 50.0);
+    assert_eq!(h.state().dialog, Some(Dialog::Signature), "the pad stays open");
+    assert!(h.state().signature_draft.image.is_some(), "with the image");
+    std::fs::remove_file(path).unwrap();
+}

@@ -78,6 +78,8 @@ pub struct Pickers {
     /// until the pick's closure starts.
     showing: Arc<AtomicBool>,
     done: Arc<Mutex<Vec<Picked>>>,
+    /// When (egui input time, seconds) the frame last took a pick, chosen or cancelled.
+    closed_at: Option<f64>,
 }
 
 /// Clears `showing` if the worker ends without queueing a pick (it panicked).
@@ -232,11 +234,22 @@ impl PdfCraftApp {
         })
     }
 
+    /// A native picker is showing, or closed less than half a second ago. The click or key press
+    /// that closed it (a double-click's second click, Enter) can reach the window behind it, and
+    /// must not also close the dialog that asked (the signature pad lost the image it had just
+    /// been sent).
+    pub(crate) fn picker_settling(&self, ctx: &egui::Context) -> bool {
+        const SETTLE: f64 = 0.5;
+        let now = ctx.input(|i| i.time);
+        self.pickers.showing.load(Ordering::SeqCst) || self.pickers.closed_at.is_some_and(|t| now - t < SETTLE)
+    }
+
     /// Use the picks that finished since the last frame. Called every frame.
     pub(crate) fn process_picked(&mut self) {
         for Picked { target, paths, then } in self.pickers.take() {
             // The pick is in hand: the next picker may show, including one `then` asks for.
             self.pickers.showing.store(false, Ordering::SeqCst);
+            self.pickers.closed_at = self.ctx.as_ref().map(|c| c.input(|i| i.time));
             // Opens were polled before this pick was consumed. Wake their retained replies
             // once, including after cancellation, without polling while a picker waits.
             if !self.pending_opens.is_empty()
