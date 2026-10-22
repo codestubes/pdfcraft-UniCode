@@ -5980,3 +5980,16 @@ fn mode_tabs_keep_the_hand_over_a_paragraph_scrolled_under_them() {
     click_at(&mut h, convert);
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the paragraph's editor");
 }
+
+/// All tools ▸ Edit a PDF edits at once, as the Edit tab does: with the Select tool left on, a
+/// click on a paragraph only selected its words.
+#[test]
+fn opening_edit_a_pdf_turns_on_edit_text() {
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    let bytes = app.session.create_from_text("Letter", "Dear reader").unwrap();
+    app.open_bytes("letter.pdf", None, bytes.as_ref().clone()).unwrap();
+    assert_eq!(app.quick_tool, pdfcraft_ui_egui::QuickTool::Select);
+    app.set_option("tool", "edit").unwrap();
+    assert_eq!(app.quick_tool, pdfcraft_ui_egui::QuickTool::EditText);
+}

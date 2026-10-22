@@ -2248,6 +2248,11 @@ impl PdfCraftApp {
     pub(crate) fn select_tool(&mut self, id: &'static str) {
         self.left = LeftPanel::Tool(id);
         self.reveal_tools();
+        // Edit a PDF from All tools edits at once, as the Edit tab does: with the Select tool left
+        // on, a click on a paragraph only selected its words.
+        if id == "edit" && self.quick_tool != QuickTool::AddText {
+            self.quick_tool = QuickTool::EditText;
+        }
         if let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) {
             if id == "organize" {
                 view.open_organize();
