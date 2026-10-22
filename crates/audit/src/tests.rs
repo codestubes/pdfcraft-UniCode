@@ -217,6 +217,69 @@ fn a_box_grazing_a_word_is_not_flagged() {
 }
 
 #[test]
+fn opaque_filled_square_annotation_over_text_is_found() {
+    let content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n";
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>");
+    b.add_stream(content);
+    b.add(FONT);
+    b.add("<< /Type /Annot /Subtype /Square /Rect [95 685 325 725] /C [0 0 0] /IC [0 0 0] >>");
+    let findings = audit_redactions(&open(b.build())).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].kind, FindingKind::CoveredText);
+    assert_eq!(findings[0].rect, [95.0, 685.0, 325.0, 725.0]);
+    assert_eq!(findings[0].covered_text, "SECRET DATA 123");
+}
+
+/// A Hidden Square (`/F 2`) is never drawn, so the text under it is not a finding.
+#[test]
+fn hidden_square_annotation_is_not_a_finding() {
+    let content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n";
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>");
+    b.add_stream(content);
+    b.add(FONT);
+    b.add("<< /Type /Annot /Subtype /Square /Rect [95 685 325 725] /C [0 0 0] /IC [0 0 0] /F 2 >>");
+    let findings = audit_redactions(&open(b.build())).expect("audit must run");
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+/// A NoView Square (`/F 32`) is never drawn on screen, so the text under it is not a finding.
+#[test]
+fn no_view_square_annotation_is_not_a_finding() {
+    let content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n";
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>");
+    b.add_stream(content);
+    b.add(FONT);
+    b.add("<< /Type /Annot /Subtype /Square /Rect [95 685 325 725] /C [0 0 0] /IC [0 0 0] /F 32 >>");
+    let findings = audit_redactions(&open(b.build())).expect("audit must run");
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+/// A Print-only Square (`/F 4`) is still drawn on screen, so the text under it is a finding.
+#[test]
+fn print_flag_square_annotation_is_still_a_finding() {
+    let content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n";
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>");
+    b.add_stream(content);
+    b.add(FONT);
+    b.add("<< /Type /Annot /Subtype /Square /Rect [95 685 325 725] /C [0 0 0] /IC [0 0 0] /F 4 >>");
+    let findings = audit_redactions(&open(b.build())).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].kind, FindingKind::CoveredText);
+}
+
+#[test]
 fn background_before_text_is_not_flagged() {
     // An opaque dark rectangle painted *before* the text is a background, not a cover.
     let content = b"0 g\n100 688 220 32 re f\nBT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n";
@@ -499,4 +562,33 @@ fn forms_nested_past_depth_limit_fail_closed() {
     // page clean with a possible cover left unseen.
     let result = audit_redactions(&open(nested_forms(33)));
     assert!(matches!(result, Err(crate::AuditError::TooDeep)), "{result:?}");
+}
+
+#[test]
+fn comment_across_streams_neither_invents_text_nor_a_cover() {
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Visible text) Tj ET % note", b"0 g 70 690 200 40 re f"));
+    assert!(audit_redactions(&doc).unwrap().is_empty(), "commented cover must not be reported");
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Before comment) Tj ET % note", b"BT /F1 24 Tf 72 650 Td (After comment) Tj ET"));
+    let text: String = pdfcraft_edit::text_lines(&doc, 0).unwrap().into_iter().map(|line| line.text).collect();
+    assert!(!text.contains("After comment"), "editor exposed phantom text: {text}");
+}
+
+#[test]
+fn reading_blocks_respect_stream_comments_and_split_operands() {
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Before comment) Tj ET % note", b"BT /F1 24 Tf 72 650 Td (After comment) Tj ET"));
+    let text: String = pdfcraft_edit::reading_blocks(&doc, 0).unwrap().into_iter().map(|block| block.editor_text).collect();
+    assert_eq!(text, "Before comment");
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Split operand)", b"Tj ET"));
+    let text: String = pdfcraft_edit::reading_blocks(&doc, 0).unwrap().into_iter().map(|block| block.editor_text).collect();
+    assert_eq!(text, "Split operand");
+    // Marked content opened in one stream applies to text in the next: its /ActualText replaces
+    // the glyphs, as when the streams are read joined.
+    for (s1, s2) in [
+        (b"BT /F1 24 Tf 72 700 Td /Span <</ActualText (Replacement text)".as_slice(), b">> BDC (Glyphs) Tj EMC ET".as_slice()),
+        (b"BT /F1 24 Tf 72 700 Td /Span <</ActualText (Replacement text)>> BDC", b"(Glyphs) Tj EMC ET"),
+    ] {
+        let doc = open(two_streams(s1, s2));
+        let text: String = pdfcraft_edit::reading_blocks(&doc, 0).unwrap().into_iter().map(|block| block.editor_text).collect();
+        assert_eq!(text, "Replacement text", "{}", String::from_utf8_lossy(s1));
+    }
 }
